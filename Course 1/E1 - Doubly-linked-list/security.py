@@ -8,14 +8,14 @@ class Node:
 
 class LinkedList:
     def __init__(self, max_size=None):
-        self.head: Node | None = None  # Points to the first node
-        self.tail: Node | None = None  # Points to the last node (New!)
+        self.head: Node | None = None
+        self.tail: Node | None = None
         self.size = 0
         self.max_size = max_size  
-        self.lock = threading.Lock()
+        # Using RLock to allow reentrant calls and prevent self-deadlocks
+        self.lock = threading.RLock()
 
     def append(self, data):
-        # Validate input data (using the fix from Step 1)
         if hasattr(data, "__len__") and len(data) > 1000:  
             raise ValueError("Data size exceeds maximum limit")
             
@@ -25,12 +25,10 @@ class LinkedList:
             
             new_node = Node(data)
             
-            # If the list is empty
             if self.tail is None:
                 self.head = new_node
                 self.tail = new_node
             else:
-                # Pylance now knows for certain that self.tail is NOT None in this block
                 new_node.prev = self.tail
                 self.tail.next = new_node
                 self.tail = new_node
@@ -38,20 +36,21 @@ class LinkedList:
             self.size += 1
 
     def print_list(self):
-        current = self.head
-        while current:
-            print(current.data, end=" ")
-            current = current.next
+        """Thread-safe forward traversal."""
+        with self.lock:
+            current = self.head
+            while current:
+                print(current.data, end=" ")
+                current = current.next
 
     def print_list_reverse(self):
-        # Start at the very end of the list
-        current = self.tail
-        
-        # Traverse backward using the prev pointers
-        while current:
-            print(current.data, end=" ")
-            current = current.prev
-        print()  # Print a new line at the end
+        """Thread-safe backward traversal."""
+        with self.lock:
+            current = self.tail
+            while current:
+                print(current.data, end=" ")
+                current = current.prev
+            print()
 
 # Test 1 - Append Multiple Data Types
 # As initially designed not all data types can be added to the linked list.
