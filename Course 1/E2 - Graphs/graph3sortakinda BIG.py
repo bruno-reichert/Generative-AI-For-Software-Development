@@ -1,4 +1,6 @@
 import heapq
+import random
+import time
 
 class Graph:
     def __init__(self, directed=False):
@@ -14,23 +16,22 @@ class Graph:
         self.directed = directed
     
     def add_vertex(self, vertex):
-        """Add a hashable vertex to the graph."""
+        if vertex is None:
+            raise ValueError("Vertex cannot be None.")
         if not isinstance(vertex, (int, str, tuple)):
             raise ValueError("Vertex must be a hashable type.")
         if vertex not in self.graph:
-            self.graph[vertex] = {}  # Store neighbors as a dictionary {neighbor: weight}
+            self.graph[vertex] = {}
      
     def add_edge(self, src, dest, weight=1.0):
-        """
-        Add a weighted edge from src to dest. 
-        If undirected, also add from dest to src.
-        """
         if src not in self.graph or dest not in self.graph:
             raise KeyError("Both vertices must exist in the graph.")
         
-        # Add or update the edge with the given weight
+        # Security Guard: Prevent negative weights
+        if float(weight) < 0:
+            raise ValueError("Edge weight cannot be negative.")
+            
         self.graph[src][dest] = float(weight)
-        
         if not self.directed:
             self.graph[dest][src] = float(weight)
     
@@ -148,6 +149,18 @@ def tsp_nearest_neighbor(graph, start_vertex):
     - tuple: (total_distance, path_list)
       Returns (float('inf'), []) if no complete tour can be found.
     """
+    # Security Guard 1: Validate start vertex existence to prevent silent logical failures
+    if start_vertex not in graph.graph:
+        raise KeyError("Start vertex must exist in the graph.")
+
+    # Security Guard 2: Prevent CPU-exhaustion DoS from extreme graph sizes
+    MAX_HEURISTIC_NODES = 20000
+    if len(graph.graph) > MAX_HEURISTIC_NODES:
+        raise ValueError(
+            f"Graph size ({len(graph.graph)} nodes) exceeds safe processing limit "
+            f"for $O(V^2)$ operations (max limit: {MAX_HEURISTIC_NODES} nodes)."
+        )
+
     all_vertices = set(graph.graph.keys())
     visited = {start_vertex}
     path = [start_vertex]
@@ -158,7 +171,6 @@ def tsp_nearest_neighbor(graph, start_vertex):
     while len(visited) < len(all_vertices):
         neighbors = graph.get_adjacent_vertices(current_vertex)
         
-        # Find the closest unvisited neighbor
         closest_neighbor = None
         min_weight = float('inf')
         
@@ -167,12 +179,10 @@ def tsp_nearest_neighbor(graph, start_vertex):
                 min_weight = weight
                 closest_neighbor = neighbor
                 
-        # If we get stuck and there are no unvisited neighbors we can reach directly,
-        # a complete tour cannot be completed using this simple heuristic.
+        # Safe exit if graph is disconnected or a node becomes unreachable
         if closest_neighbor is None:
             return float('inf'), []
             
-        # Move to the closest neighbor
         visited.add(closest_neighbor)
         path.append(closest_neighbor)
         total_distance += min_weight
@@ -184,21 +194,25 @@ def tsp_nearest_neighbor(graph, start_vertex):
         total_distance += final_neighbors[start_vertex]
         path.append(start_vertex)
     else:
-        # Cannot return to start
         return float('inf'), []
 
     return total_distance, path
 
-import random
-import time
 
 # --- Helper to generate a fully connected graph for TSP ---
 def generate_complete_tsp_graph(num_nodes=1000):
+    # Security Guard 3: Prevent memory exhaustion crashes (OOM)
+    MAX_TEST_NODES = 5000
+    if num_nodes > MAX_TEST_NODES:
+        raise ValueError(
+            f"Requested size ({num_nodes} nodes) is too large for complete graph generation. "
+            f"Max limit allowed is {MAX_TEST_NODES} to prevent Out-of-Memory crashes."
+        )
+
     g = Graph(directed=False)
     for i in range(num_nodes):
         g.add_vertex(i)
         
-    # Connect every node to every other node with a random weight (distance)
     for i in range(num_nodes):
         for j in range(i + 1, num_nodes):
             weight = random.uniform(5.0, 100.0)

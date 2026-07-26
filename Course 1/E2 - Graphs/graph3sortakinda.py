@@ -14,23 +14,22 @@ class Graph:
         self.directed = directed
     
     def add_vertex(self, vertex):
-        """Add a hashable vertex to the graph."""
+        if vertex is None:
+            raise ValueError("Vertex cannot be None.")
         if not isinstance(vertex, (int, str, tuple)):
             raise ValueError("Vertex must be a hashable type.")
         if vertex not in self.graph:
-            self.graph[vertex] = {}  # Store neighbors as a dictionary {neighbor: weight}
+            self.graph[vertex] = {}
      
     def add_edge(self, src, dest, weight=1.0):
-        """
-        Add a weighted edge from src to dest. 
-        If undirected, also add from dest to src.
-        """
         if src not in self.graph or dest not in self.graph:
             raise KeyError("Both vertices must exist in the graph.")
         
-        # Add or update the edge with the given weight
+        # Security Guard: Prevent negative weights
+        if float(weight) < 0:
+            raise ValueError("Edge weight cannot be negative.")
+            
         self.graph[src][dest] = float(weight)
-        
         if not self.directed:
             self.graph[dest][src] = float(weight)
     
@@ -148,6 +147,13 @@ def tsp_exact(graph, start_vertex):
     - tuple: (best_distance, best_path)
       Returns (float('inf'), []) if no valid tour exists.
     """
+    # Security Guard: Limit input size to prevent CPU exhaustion and stack overflow
+    MAX_EXACT_NODES = 12
+    if len(graph.graph) > MAX_EXACT_NODES:
+        raise ValueError(
+            f"Graph size ({len(graph.graph)} nodes) exceeds the safe threshold for exact TSP solver "
+            f"(max {MAX_EXACT_NODES} nodes). Use the heuristic solver instead to prevent DoS."
+        )
     all_vertices = set(graph.graph.keys())
     best_path = []
     # We use a list to store best_distance so we can mutate it inside the helper function
