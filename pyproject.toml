@@ -12,6 +12,8 @@ dependencies = [
     "httpx>=0.28.1",
     "jupyter>=1.1.1",
     "marshmallow>=4.3.0",
+    "numpy>=2.5.1",
+    "pandas>=3.0.5",
     "pydantic[email]>=2.13.4",
     "uvicorn>=0.52.0",
 ]
