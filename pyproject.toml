@@ -15,5 +15,6 @@ dependencies = [
     "numpy>=2.5.1",
     "pandas>=3.0.5",
     "pydantic[email]>=2.13.4",
+    "sphinx>=9.1.0",
     "uvicorn>=0.52.0",
 ]
