@@ -1,0 +1,16 @@
+{
+  "name": "e5---comments-in-other-languages",
+  "version": "1.0.0",
+  "description": "",
+  "main": "snippet2.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "jsdoc": "^4.0.5"
+  }
+}
