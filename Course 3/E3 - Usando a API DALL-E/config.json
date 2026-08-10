@@ -1,0 +1,20 @@
+{
+    "api_base_url": "https://image.pollinations.ai/prompt",
+    "output_directory": "my_ai_gallery",
+    "default_output_file": "creation",
+    "network_settings": {
+        "timeout_seconds": 15,
+        "max_retries": 3
+    },
+    "image_settings": {
+        "width": 1024,
+        "height": 768,
+        "num_images": 3,
+        "remove_watermark": true,
+        "fixed_seed": null,
+        "model": "flux",
+        "enhance_prompt": true,
+        "quality_suffix": ", highly detailed, cinematic lighting, masterpiece, 8k",
+        "negative_prompt": "blurry, low quality, text, watermark, bad anatomy"
+    }
+}
