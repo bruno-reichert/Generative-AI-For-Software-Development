@@ -4,6 +4,7 @@ import random
 import time
 import urllib.parse
 import requests
+import pickle # New: For object serialization
 
 # 1. Load the Configuration File
 CONFIG_FILE = "C:\\Users\\reich\\Downloads\\Generative AI For Software Development\\Course 3\\E3 - Usando a API DALL-E\\config.json"
@@ -14,10 +15,10 @@ except FileNotFoundError:
     raise FileNotFoundError(f"Missing configuration file: {CONFIG_FILE}")
 
 
-def generate_multiple_images(user_prompt):
+def generate_and_pickle_images(user_prompt):
     """
-    Generates multiple unique images sequentially based on a user prompt,
-    utilizing custom configuration values and network retry safety.
+    Generates multiple unique images sequentially, saves them as PNGs,
+    and then pickles all image data along with the config to a .pkl file.
     """
     # Extract directory and file settings
     base_url = config["api_base_url"]
@@ -44,6 +45,13 @@ def generate_multiple_images(user_prompt):
 
     print(f"Beginning sequential generation of {n} images inside: '{output_dir}/'...")
 
+    # New: Initialize dictionary to hold config and all image data for pickling
+    # The 'config' is stored for reproducibility, and 'images' will store raw bytes.
+    pickle_data = {
+        "config": config,
+        "images": {}
+    }
+
     # Loop 'n' times sequentially (the robust tractor approach)
     for i in range(1, n + 1):
         # Determine the seed (use fixed seed if specified, otherwise generate random)
@@ -61,8 +69,11 @@ def generate_multiple_images(user_prompt):
             "negative": img_settings["negative_prompt"]
         }
         
-        filename = os.path.join(output_dir, f"{output_base_name}_{i}.png")
-        print(f"Generating image {i}/{n} (seed: {seed}) as '{filename}'...")
+        # Generate the filename for both .png and for use as a key in pickle_data
+        filename_without_path = f"{output_base_name}_{i}.png"
+        full_filename_path = os.path.join(output_dir, filename_without_path)
+        
+        print(f"Generating image {i}/{n} (seed: {seed}) as '{full_filename_path}'...")
 
         # 5. Robust Network Loop: Handle retries and timeouts for each sequential request
         success = False
@@ -73,12 +84,16 @@ def generate_multiple_images(user_prompt):
         while not success and attempts < max_attempts:
             try:
                 attempts += 1
-                # Send the request with explicit timeout and query parameters mapping
                 response = requests.get(target_url, params=query_params, timeout=timeout)
                 
                 if response.status_code == 200:
-                    with open(filename, "wb") as file:
+                    # Save image as PNG
+                    with open(full_filename_path, "wb") as file:
                         file.write(response.content)
+                    
+                    # New: Store raw image content in our pickle_data dictionary
+                    pickle_data["images"][filename_without_path] = response.content
+                    
                     success = True
                 else:
                     print(f"  Attempt {attempts}/{max_attempts} failed with HTTP Status: {response.status_code}")
@@ -88,7 +103,6 @@ def generate_multiple_images(user_prompt):
             except requests.exceptions.RequestException as e:
                 print(f"  Attempt {attempts}/{max_attempts} network error: {e}")
 
-            # If an attempt fails, pause briefly before retrying
             if not success and attempts < max_attempts:
                 time.sleep(2)
 
@@ -97,8 +111,35 @@ def generate_multiple_images(user_prompt):
 
     print("\nAll image generations complete!")
 
+    # 6. New: Pickle the entire data dictionary (config + all images)
+    # The .pkl file will be saved in the main output_dir.
+    pickle_output_filename = os.path.join(output_dir, f"{output_base_name}_data.pkl")
+    try:
+        with open(pickle_output_filename, "wb") as pickle_file:
+            pickle.dump(pickle_data, pickle_file)
+        print(f"Successfully pickled configuration and image data to '{pickle_output_filename}'")
+    except Exception as e:
+        print(f"  [ERROR] Failed to pickle data: {e}")
+
 
 # --- Execution ---
 if __name__ == "__main__":
-    test_prompt = "An oil painting of an early 20th-century city skyline at dawn, with soft pastel colors and a dreamy atmosphere"
-    generate_multiple_images(test_prompt)
+    test_prompt = "An astronaut riding a unicorn on the moon, pixel art style"
+    generate_and_pickle_images(test_prompt)
+
+    # --- Verification of Pickled Data ---
+    # After running the script, you can load and inspect the pickled data:
+    # try:
+    #     pickle_file_path = os.path.join(config["output_directory"], f"{config['default_output_file']}_data.pkl")
+    #     with open(pickle_file_path, "rb") as file:
+    #         loaded_data = pickle.load(file)
+    #     print("\n--- Loaded Pickled Data Verification ---")
+    #     print(f"Loaded config: {loaded_data['config']['image_settings']['width']}x{loaded_data['config']['image_settings']['height']}")
+    #     print(f"Number of images in pickled data: {len(loaded_data['images'])}")
+    #     # To further verify, you could save one of the pickled images to a new file:
+    #     # with open("restored_image_from_pickle.png", "wb") as f:
+    #     #    f.write(loaded_data['images'][f"{config['default_output_file']}_1.png"])
+    # except FileNotFoundError:
+    #     print(f"\n[Verification] Pickled file not found at {pickle_file_path}")
+    # except Exception as e:
+    #     print(f"\n[Verification Error] Failed to load pickled data: {e}")
