@@ -482,6 +482,7 @@ dependencies = [
     { name = "pydantic", extra = ["email"] },
     { name = "pyyaml" },
     { name = "sphinx" },
+    { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
 
@@ -499,6 +500,7 @@ requires-dist = [
     { name = "pydantic", extras = ["email"], specifier = ">=2.13.4" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "sphinx", specifier = ">=9.1.0" },
+    { name = "sqlalchemy", specifier = ">=2.0.51" },
     { name = "uvicorn", specifier = ">=0.52.0" },
 ]
 

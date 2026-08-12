@@ -17,5 +17,6 @@ dependencies = [
     "pydantic[email]>=2.13.4",
     "pyyaml>=6.0.3",
     "sphinx>=9.1.0",
+    "sqlalchemy>=2.0.51",
     "uvicorn>=0.52.0",
 ]
