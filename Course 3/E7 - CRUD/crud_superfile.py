@@ -5,11 +5,10 @@ This module serves as a unified repository service for managing our e-commerce
 SQLite database. It encapsulates the SQLAlchemy engine, table schemas, 
 and provides a complete transactional CRUD interface.
 """
-
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Sequence
-from sqlalchemy import create_engine, ForeignKey, String, Numeric, DateTime, func, select
+from sqlalchemy import create_engine, ForeignKey, String, Numeric, DateTime, func, select, Index
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, Session
 
 # =====================================================================
@@ -17,6 +16,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 # =====================================================================
 # Initialize the engine. In production, this URI would be loaded from an environment variable.
 engine = create_engine("sqlite:///ecommerce.db", echo=False)
+
+# In-memory cache stores
+_PRODUCT_CACHE = {}
 
 
 # =====================================================================
@@ -54,21 +56,24 @@ class Product(Base):
 
 
 class Order(Base):
-    """Represents a purchase transaction made by a User."""
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    # Best Practice: Index foreign keys because they are frequently used in JOINs
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    
     order_date: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    
+    # Best Practice: Index columns used in common filters (e.g., finding all 'shipped' orders)
+    status: Mapped[str] = mapped_column(String(20), index=True, default="pending")
 
-    # Relationships
+    # Relationships remain the same
     user: Mapped["User"] = relationship(back_populates="orders")
     items: Mapped[List["OrderItem"]] = relationship(back_populates="order", cascade="all, delete-orphan")
 
 
 class OrderItem(Base):
-    """Association table linking Orders to Products with historical purchase data."""
     __tablename__ = "order_items"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -77,7 +82,13 @@ class OrderItem(Base):
     quantity: Mapped[int] = mapped_column(nullable=False)
     price_at_purchase: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
 
-    # Relationships
+    # Table-level arguments: Create a composite index on both order_id and product_id
+    # This speeds up searches checking if a specific product is in a specific order.
+    __table_args__ = (
+        Index("ix_order_items_order_product", "order_id", "product_id"),
+    )
+
+    # Relationships remain the same
     order: Mapped["Order"] = relationship(back_populates="items")
     product: Mapped["Product"] = relationship(back_populates="order_items")
 
@@ -224,6 +235,26 @@ def get_product_by_id(session: Session, product_id: int) -> Product | None:
     """
     return session.get(Product, product_id)
 
+def get_product_by_id_cached(session: Session, product_id: int) -> Product | None:
+    """
+    Retrieves a product by its ID, utilizing a fast in-memory cache 
+    to bypass database disk access.
+    """
+    # 1. Check if the product is already in our memory cache
+    if product_id in _PRODUCT_CACHE:
+        print(f"[CACHE HIT] Returning Product {product_id} from memory.")
+        return _PRODUCT_CACHE[product_id]
+
+    # 2. Cache Miss: Query the database
+    print(f"[CACHE MISS] Fetching Product {product_id} from database file...")
+    product = session.get(Product, product_id)
+    
+    if product:
+        # Save the result in the cache for future queries
+        _PRODUCT_CACHE[product_id] = product
+        
+    return product
+
 
 def get_order_by_id(session: Session, order_id: int) -> Order | None:
     """
@@ -320,37 +351,216 @@ def get_most_ordered_product(session: Session) -> tuple[str, int] | None:
 # 6. CRUD: UPDATE Operations
 # =====================================================================
 def update_product_stock_and_price(session: Session, product_id: int, new_stock: int, new_price: float) -> Product | None:
-    """
-    Updates the stock and price values of an existing product using automatic dirty tracking.
-
-    :param session: Active SQLAlchemy database Session.
-    :param product_id: The primary key ID of the target product.
-    :param new_stock: The updated inventory integer.
-    :param new_price: The updated retail price float.
-    :return: The updated Product object if found, otherwise None.
-    """
+    """Updates product stock and price, and invalidates the cache."""
     product = session.get(Product, product_id)
     if product:
         product.stock = new_stock
         product.price = Decimal(str(new_price))
         session.commit()
+        
+        # Cache Invalidation: Delete stale data from cache so it is fetched fresh next time
+        if product_id in _PRODUCT_CACHE:
+            del _PRODUCT_CACHE[product_id]
+            print(f"[CACHE INVALIDATED] Cleared stale Product {product_id} from memory.")
+            
     return product
+
+
+def update_user_email(session: Session, user_id: int, new_email: str) -> User | None:
+    """
+    Updates the email address of an existing User.
+
+    :param session: Active SQLAlchemy database Session.
+    :param user_id: The primary key ID of the target User.
+    :param new_email: The new email address string.
+    :return: The updated User object if found, otherwise None.
+    """
+    user = session.get(User, user_id)
+    if user:
+        user.email = new_email
+        session.commit()  # Dirty tracking automatically triggers SQL UPDATE here
+    return user
+
+
+def update_order_status(session: Session, order_id: int, new_status: str) -> Order | None:
+    """
+    Updates the status of an existing Order (e.g., from 'pending' to 'shipped').
+
+    :param session: Active SQLAlchemy database Session.
+    :param order_id: The primary key ID of the target Order.
+    :param new_status: The new status string (e.g., 'shipped', 'completed', 'cancelled').
+    :return: The updated Order object if found, otherwise None.
+    """
+    order = session.get(Order, order_id)
+    if order:
+        order.status = new_status
+        session.commit()
+    return order
+
+
+def update_order_item_quantity(session: Session, order_item_id: int, new_quantity: int) -> OrderItem | None:
+    """
+    Updates the quantity of a specific item inside an order.
+
+    :param session: Active SQLAlchemy database Session.
+    :param order_item_id: The primary key ID of the target OrderItem.
+    :param new_quantity: The new quantity integer (must be greater than 0).
+    :return: The updated OrderItem object if found, otherwise None.
+    :raises ValueError: If the new_quantity is 0 or negative.
+    """
+    # Defensive check: Prevent logically impossible quantities
+    if new_quantity <= 0:
+        raise ValueError("Database Integrity Error: Quantity must be a positive integer.")
+
+    item = session.get(OrderItem, order_item_id)
+    if item:
+        item.quantity = new_quantity
+        session.commit()
+    return item
+
+def modify_order_item(
+    session: Session, 
+    order_id: int, 
+    product_id: int, 
+    action: str, 
+    quantity: int | None = None
+) -> OrderItem | None:
+    """
+    Orchestrates high-level updates to an Order by adding, modifying, or 
+    removing products inside that order.
+
+    :param session: Active SQLAlchemy database Session.
+    :param order_id: The primary key ID of the parent Order.
+    :param product_id: The primary key ID of the Product to modify.
+    :param action: The modification to perform: 'add', 'update', or 'remove'.
+    :param quantity: The quantity integer (required for 'add' and 'update').
+    :return: The affected OrderItem if added/updated, or None if removed.
+    :raises KeyError: If the Order or Product does not exist.
+    :raises ValueError: If the action is invalid or quantity is 0 or negative.
+    """
+    # 1. Validation: Verify the parent order exists
+    order = session.get(Order, order_id)
+    if not order:
+        raise KeyError(f"Database Integrity Error: Order with ID {order_id} does not exist.")
+
+    # 2. Query to see if this product is already in the order
+    # (selects the OrderItem where order_id and product_id match)
+    query = select(OrderItem).where(
+        OrderItem.order_id == order_id, 
+        OrderItem.product_id == product_id
+    )
+    existing_item = session.scalar(query)
+
+    # =================================================================
+    # CASE A: Adding a product
+    # =================================================================
+    if action == "add":
+        if not quantity or quantity <= 0:
+            raise ValueError("Invalid Quantity: Must specify a positive quantity to add.")
+        
+        if existing_item:
+            # If the product already exists in the order, simply increase the quantity
+            existing_item.quantity += quantity
+            session.commit()
+            return existing_item
+        else:
+            # If it's a new product, call our helper (which automatically captures price)
+            return add_item_to_order(session, order_id, product_id, quantity)
+
+    # =================================================================
+    # CASE B: Updating quantity
+    # =================================================================
+    elif action == "update":
+        if not quantity or quantity <= 0:
+            raise ValueError("Invalid Quantity: Quantity must be a positive integer (cannot be 0 or negative).")
+        
+        if not existing_item:
+            raise KeyError(f"Order Update Error: Product ID {product_id} is not in Order {order_id}.")
+        
+        existing_item.quantity = quantity
+        session.commit()
+        return existing_item
+
+    # =================================================================
+    # CASE C: Removing a product
+    # =================================================================
+    elif action == "remove":
+        if not existing_item:
+            raise KeyError(f"Order Update Error: Product ID {product_id} is not in Order {order_id}.")
+        
+        session.delete(existing_item)
+        session.commit()
+        return None
+
+    else:
+        raise ValueError(f"Invalid Action '{action}': Must be 'add', 'update', or 'remove'.")
 
 
 # =====================================================================
 # 7. CRUD: DELETE Operations
 # =====================================================================
 def delete_product(session: Session, product_id: int) -> bool:
-    """
-    Deletes an existing product record from the database.
-
-    :param session: Active SQLAlchemy database Session.
-    :param product_id: The primary key ID of the target product.
-    :return: True if the deletion succeeded, False if the product was not found.
-    """
+    """Deletes a product, and invalidates the cache."""
     product = session.get(Product, product_id)
     if product:
         session.delete(product)
+        session.commit()
+        
+        # Cache Invalidation
+        if product_id in _PRODUCT_CACHE:
+            del _PRODUCT_CACHE[product_id]
+            print(f"[CACHE INVALIDATED] Removed deleted Product {product_id} from memory.")
+        return True
+    return False
+
+def delete_user(session: Session, user_id: int) -> bool:
+    """
+    Deletes an existing User from the database.
+    
+    Warning: This triggers cascade deletions on all associated orders 
+    and order items to preserve referential integrity.
+
+    :param session: Active SQLAlchemy database Session.
+    :param user_id: The primary key ID of the target User.
+    :return: True if the deletion succeeded, False if the User was not found.
+    """
+    user = session.get(User, user_id)
+    if user:
+        session.delete(user)
+        session.commit()
+        return True
+    return False
+
+
+def delete_order(session: Session, order_id: int) -> bool:
+    """
+    Deletes an existing Order from the database.
+    
+    Warning: This triggers cascade deletions on all associated order items.
+
+    :param session: Active SQLAlchemy database Session.
+    :param order_id: The primary key ID of the target Order.
+    :return: True if the deletion succeeded, False if the Order was not found.
+    """
+    order = session.get(Order, order_id)
+    if order:
+        session.delete(order)
+        session.commit()
+        return True
+    return False
+
+
+def delete_order_item(session: Session, order_item_id: int) -> bool:
+    """
+    Deletes a specific OrderItem from the database by its ID.
+
+    :param session: Active SQLAlchemy database Session.
+    :param order_item_id: The primary key ID of the target OrderItem.
+    :return: True if the deletion succeeded, False if the OrderItem was not found.
+    """
+    item = session.get(OrderItem, order_item_id)
+    if item:
+        session.delete(item)
         session.commit()
         return True
     return False
