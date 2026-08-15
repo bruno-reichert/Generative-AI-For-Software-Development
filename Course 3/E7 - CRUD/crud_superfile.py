@@ -8,7 +8,7 @@ and provides a complete transactional CRUD interface.
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Sequence
-from sqlalchemy import create_engine, ForeignKey, String, Numeric, DateTime, func, select, Index
+from sqlalchemy import create_engine, ForeignKey, String, Numeric, DateTime, func, select, Index, text, ClauseElement
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, Session
 
 # =====================================================================
@@ -99,6 +99,32 @@ class OrderItem(Base):
 def initialize_tables():
     """Reads all schema definitions and creates the physical SQL tables in SQLite."""
     Base.metadata.create_all(engine)
+
+
+def explain_query(session: Session, statement: ClauseElement) -> str:
+    """
+    Compiles any SQLAlchemy select statement, prepends SQLite's 'EXPLAIN QUERY PLAN', 
+    and returns the database's planned execution steps as a string.
+    
+    This is used to debug and verify that our database indexes are working.
+    """
+    # 1. Compile the SQLAlchemy statement into a raw SQL string with literal values bound
+    compiled_sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    
+    # 2. Prepend SQLite's 'EXPLAIN QUERY PLAN' directive
+    explain_sql = text(f"EXPLAIN QUERY PLAN {compiled_sql}")
+    
+    # 3. Execute the explain query
+    # SQLite EXPLAIN returns columns: (id, parent, notused, detail)
+    results = session.execute(explain_sql).all()
+    
+    # 4. Format the execution plan details
+    plan_lines = []
+    for row in results:
+        # row[3] contains the text description of what SQLite is doing
+        plan_lines.append(f"  -> {row[3]}")
+        
+    return "\n".join(plan_lines)
 
 
 # =====================================================================
